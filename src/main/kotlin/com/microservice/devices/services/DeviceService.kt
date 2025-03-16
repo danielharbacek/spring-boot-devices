@@ -13,9 +13,10 @@ class DeviceService(
     private val repository: DeviceRepository
 ) {
     fun getDevices(): List<DeviceDto> {
-        return repository.findAllWithFullDetails().map {
+        return repository.findAllWithModel().map {
             it.toDto()
         }
+//        return repository.findDevicesByModelName("model1").map { it.toDto() }
     }
 
     fun getDevice(id: Long): DeviceDto {

@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface DeviceRepository: JpaRepository<Device, Long> {
-    @EntityGraph("Device.model")
+    @EntityGraph(attributePaths = ["model"])
     @Query("SELECT d FROM Device d")
-    fun findAllWithFullDetails(): List<Device>
+    fun findAllWithModel(): List<Device>
 }

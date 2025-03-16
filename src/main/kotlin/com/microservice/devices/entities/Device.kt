@@ -4,12 +4,6 @@ import jakarta.persistence.*
 import java.time.LocalDateTime
 
 @Entity
-@NamedEntityGraph(
-    name = "Device.model",
-    attributeNodes = [
-        NamedAttributeNode("model"),
-    ]
-)
 data class Device(
 
     @Id
