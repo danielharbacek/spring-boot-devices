@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: Simple Test
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop  # Creates schema on start, drops it on exit
+    show-sql: true  # Enable SQL query logging
