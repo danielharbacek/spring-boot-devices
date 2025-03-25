@@ -8,6 +8,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.post
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -18,8 +19,15 @@ class EndToEndTests {
 
     @Test
     fun testController() {
-        webMvc.perform(MockMvcRequestBuilders.get("/test"))
-            .andExpect(status().isOk)
-            .andExpect(content().string("Hello World"))
+        // val requestBody = TestDto("name", "surname")
+        mockMvc.post("/test") {
+            // contentType = MediaType.APPLICATION_JSON
+            accept = MediaType.APPLICATION_JSON
+            // content = jacksonObjectMapper().writeValueAsString(requestBody)
+        }.andExpect {
+            status { isOk() }
+            content { contentType(MediaType.APPLICATION_JSON) }
+            content { jsonPath("$.message") { value("Hello World") } }
+        }
     }
 }
