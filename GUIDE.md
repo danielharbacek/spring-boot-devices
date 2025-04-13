@@ -51,7 +51,132 @@ To create new project, use [Spring Boot Starter](https://start.spring.io). Commo
 ./mvnw test
 ```
 
-## Key components
+### Build JAR file
+```shell
+./mvnw clean package
+```
+
+### Run JAR file
+```shell
+java -jar target/app-name.jar
+```
+
+## Dependency injection
+
+### Beans
+A Spring Bean is simply a Java object that is managed by the Spring IoC (Inversion of Control) container. Beans are instantiated, assembled, and managed by Spring. They are defined in Spring’s ApplicationContext (which is the container). They form the backbone of your application in Spring.
+
+To create beans, choose one of following approaches:
+
+```kotlin
+// Annotate class with @Component annotation
+@Component
+class MyService
+
+// Declare a method annotated with @Bean inside a @Configuration class
+@Configuration
+class AppConfig { 
+    // Bean name is function's name is not specified by @Bean annotation
+    @Bean
+    fun myService(): MyService = MyService()
+}
+```
+
+#### Instantiation of beans
+By default, Spring creates an instance of each bean on application startup. This is called eager instantiation. Bean can be configured as lazy. It means that Spring will create an instance of a bean first time when something wants to use it
+
+```kotlin
+@Component
+@Lazy
+class LazyBean
+```
+
+#### Lifecycle of beans
+Spring calls functions annotated with `@PostConstruct` as soon as a bean is created and correctly initialized. Right before it is destroyed, Spring calls functions annotated with `@PreDestroy`.
+
+```kotlin
+// Initialization code
+@PostConstruct
+fun init() {}
+
+// Cleanup code
+@PreDestroy
+fun cleanup() {}
+```
+
+#### Bean scopes
+- Singleton (default) - always use same instance of a bean
+- Prototype - everytime we request for a bean, we get a new instance
+- Request - there is one instance per HTTP request (web apps only)
+- Session - there is one instance per HTTP session
+- Application - there is one instance per ServletContext
+
+```kotlin
+@Component
+@RequestScope
+class TestService
+```
+
+#### Conditional beans
+Spring allows to create a bean only if a certain condition is met.
+
+```kotlin
+@ConditionalOnProperty(name=["feature.enabled"], havingValue=true)
+fun enabledFeatureBean(): Feature = Feature()
+```
+
+#### Inject values
+We can also inject values from `appliation.properties` or `application.yml` files.
+
+```kotlin
+@Value("\${app.name}")
+private lateinit var appName: String
+```
+
+### Autowiring
+Autowiring is the process of automatically injecting dependencies into a Spring bean by type, name, or constructor.
+
+Objects can be injected in following ways:
+- @Autowired - inject bean by data type
+- @Qualifier - inject bean by name
+
+```kotlin
+// @Autowired annotation is not necessary if class has only one constructor
+@Component
+class UserController(private val userService: UserService)
+```
+
+There are following types of autowiring:
+- Constructor injection
+- Field injection
+- Setter injection
+
+#### Conflicts
+When multiple candidates are found for autowiring, we can use two solutions to resolve the conflicts:
+- use `@Primary` annotation to indicate which bean should be preferred
+- use @Qualifier to autowire a bean using bean name
+
+```kotlin
+// Bean name is 'pdfReport'
+// Or use @Primary
+@Component(value = "pdfReport")
+class PdfReportService : ReportService
+
+// Bean name is 'excelReport'
+@Component(value = "excelReport")
+class ExcelReportService : ReportService
+
+// Inject ReportService by bean name 'pdfReport'
+// If parameter name would be 'pdfReport', PdfReportService would be injected without the need for @Qualifier annotation
+class ReportController(
+   @Qualifier("pdfReport") private val reportService: ReportService
+)
+```
+
+#### Circular dependency
+Spring detects circular dependencies during the creation of beans. If constructor injection is used, Spring will throw an exception indicating a circular dependency. To resolve circular dependencies, you can use setter injection or mark one of the dependencies with `@Lazy` annotation, which tells Spring to initialize the bean lazily.
+
+## Key components of web applications
 These are the most important components of REST API application:
 
 ### Controllers
