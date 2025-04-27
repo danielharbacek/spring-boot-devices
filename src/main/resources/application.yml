@@ -9,3 +9,19 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     show-sql: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+jwt:
+  secret: BWXt6ZHbMT67bAfcFP2zT42rQ48grQuG7VTMtHbgmxjTVF6QWoQvRmZ4QjCfqDFH
+logging:
+  level:
+    org:
+      springframework:
+        security: debug
