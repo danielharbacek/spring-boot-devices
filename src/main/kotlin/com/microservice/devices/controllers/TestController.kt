@@ -2,10 +2,13 @@ package com.microservice.devices.controllers
 
 import com.microservice.devices.JwtUtil
 import com.microservice.devices.LogAspect
+import com.microservice.devices.StartsWithCapital
 import com.microservice.devices.User
 import com.microservice.devices.dto.TestDto
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.core.env.Environment
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.annotation.Secured
 import org.springframework.security.authentication.AuthenticationManager
@@ -15,7 +18,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.web.bind.annotation.*
-
 
 @RestController
 @RequestMapping("/test")
@@ -31,7 +33,7 @@ class TestController(
     }
 
     @GetMapping("/{name}")
-    fun test(@PathVariable @NotBlank @Size(min = 3) name: String): TestDto {
+    fun test(@PathVariable @StartsWithCapital name: String): TestDto {
         return TestDto("Hello $name")
     }
 

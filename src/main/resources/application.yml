@@ -9,7 +9,13 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     show-sql: true
+  output:
+    ansi:
+      enabled: always
 management:
+  info:
+    env:
+      enabled: true
   endpoints:
     web:
       exposure:
@@ -21,7 +27,22 @@ management:
 jwt:
   secret: BWXt6ZHbMT67bAfcFP2zT42rQ48grQuG7VTMtHbgmxjTVF6QWoQvRmZ4QjCfqDFH
 logging:
+  file:
+    name: 'app.log'
+  #    path: '.'
+  structured:
+    format:
+      file: logstash
+    json:
+      add:
+        corpname: mycorp
   level:
     org:
       springframework:
         security: debug
+#    root: error
+info:
+  app:
+    name: MyApp
+    version: '@project.version@'
+    description: Production API

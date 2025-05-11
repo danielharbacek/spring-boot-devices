@@ -86,7 +86,155 @@ com
 If our application is structured as above, all components are registered as beans.
 
 ## App Configuration
+Spring Boot lets us externalize configuration so that we can work with the same application code in different environments. We can use a variety of external configuration sources including Java properties files, YAML files, environment variables, and command-line arguments. 
+
+Spring Boot reads configuration properties from multiple sources. Spring Boot uses a very particular order that is designed to allow sensible overriding of values. Later property sources can override the values defined in earlier ones. Sources are considered in the following order:
+1. Default properties (default configuration)
+2. application.properties (or application.yml)
+3. environment specific properties (application-dev.properties)
+4. OS environment variables 
+5. Java system properties 
+6. Command-line arguments 
+7. ... and many more
+
+Config data files (application.yml or application.properties) are considered in the following order:
+1. Application properties packaged inside jar (default application properties file)
+2. Profile-specific application properties packaged inside jar (application-{profile} properties file)
+3. Application properties outside packaged jar
+4. Profile-specific application properties outside packaged jar
+
+Property values can be injected directly into beans by using the `@Value` annotation:
+
+```kotlin
+@Component
+class MyBean {
+    // Use @Value annotation
+	@Value("\${app.name}")
+	private val appName: String? = null
+}
+
+// Or use Environment class to retrieve properties
+@Component
+class MyBean(
+    private val environment: Environment,
+) {
+   fun getAppName(): String {
+       return environment.getProperty("app.name")
+   }
+}
+```
+
+
+### Auto configuration
 Thanks to `@SpringBootApplication` annotation, application is auto-configured by default, which means that, for example, if our app uses any database driver, it is automatically configured and database connection is created. We can override auto-configuration by creating our own configuration. It is generally recommended that primary source of configuration is a single `@Configuration` class. Usually the class that defines the main method is a good candidate as the primary `@Configuration`.
+
+### Profiles
+Spring Boot allows different configs for different environments (dev, test, prod, etc.) using profiles. We can specify following application properties files:
+- application-dev.yml 
+- application-prod.yml 
+- application-test.yml
+
+Those files specify three environments - dev, prod and test. Each environment can for example use different database. There are following ways to switch between those environments:
+- In application.yml - spring.profiles.active=dev 
+- As JVM arg - -Dspring.profiles.active=prod 
+- As environment variable - SPRING_PROFILES_ACTIVE=prod
+- In test with annotation - @ActiveProfiles("test")
+- In conditional beans - @Profile("dev")
+
+```yaml
+# Activate 'dev' and 'hsqldb' profiles
+spring:
+  profiles:
+    active: "dev,hsqldb"
+```
+
+If no profile is active, a `default` profile is enabled. The name of the `default` profile is `default`. We can also specify custom default profile:
+
+```yaml
+spring:
+  profiles:
+    default: "dev"
+```
+
+For example, if an application activates a profile named `prod` and uses YAML files, then both `application.yml` and `application-prod.yml` will be loaded by Spring. Profile-specific properties are loaded from the same locations as standard `application.yml`, with profile-specific files always overriding the non-specific ones.
+
+Best practice is to specify a default profile in default `application.yml` file and then activate another profile when running jar to override default profile.
+
+We can also load specific beans depending on active profile:
+
+```kotlin
+// Bean is loaded only if profile 'prod' is active
+@Component
+@Profile("prod")
+class ProductionConfig
+```
+
+### Type-safe configuration properties
+Using the `@Value("${property}")` annotation to inject configuration properties can sometimes be cumbersome, especially if you are working with multiple properties or your data is hierarchical in nature. Type-safe configuration properties in Spring Boot let us map configuration values directly into a Java class, making them easier to access, validate, and maintain. This approach is strongly recommended over using `@Value` for anything more than a couple of properties.
+
+Type-safe configuration offers following advantages:
+- Cleaner and more readable 
+- Centralized config 
+- Compile-time validation 
+- Supports nested and complex objects 
+- Auto-completion in IDEs (with Spring support)
+
+Consider following configuration:
+
+```yaml
+# It is not necessary to specify every single property - only those that we want to override
+my:
+  service:
+    remote-address: 192.168.1.1
+    security:
+      username: "admin"
+      roles:
+      - "USER"
+      - "ADMIN"
+```
+
+We can load in into Java POJO class:
+
+```kotlin
+@Component
+// Perform validation on properties
+@Validated
+// Use common prefix 'my.service'
+@ConfigurationProperties("my.service")
+class ServiceProperties {
+   var isEnabled = false
+   var remoteAddress: InetAddress? = null
+   val security = Security()
+
+   class Security {
+      var username: String? = null
+      var password: String? = null
+
+      @field:NotBlank(message = "Roles must not be blank")
+      var roles: List<String> = ArrayList(setOf("USER"))
+   }
+}
+
+// Or use immutable object
+@Component
+@Validated
+@ConfigurationProperties("my.service")
+class MyProperties(val enabled: Boolean, val remoteAddress: InetAddress, val security: Security) {
+   class Security(val username: String, val password: String, 
+                  @param:DefaultValue("USER") 
+                  @field:NotBlank(message = "Roles must not be blank") 
+                  val roles: List<String>)
+
+}
+```
+
+Now inject the bean into our application:
+```kotlin
+@Service
+class ServiceHandler(
+    private val properties: ServiceProperties,
+)
+```
 
 ## Dependency injection
 
@@ -289,20 +437,21 @@ class TestController {
 }
 ```
 
-## Key components of web applications
-These are the most important components of REST API application:
-
-### Controllers
+## REST Controllers
 Controllers handle HTTP endpoints and generate a response. We can use following annotation that implement basic concepts:
 - `@RequestMapping` - specify an URL path that the controller will handle
 - `@PostMapping`, `@PutMapping`, ... - handle different HTTP methods
 - `@RequestParam` - handle query parameters
 - `@PathVariable` - handle parameter passed in URL
+- `@RequestBody` - handle body sent in request
+- `@RequestHeader` - handle value of particular header
+- `@ResponseBody` - if not using @Controller instead of @RestController, tell Spring that this method returns data instead of view
+
+`RequestEntity` and `ResponseEntity` classes are used to specify information inside HTTP request or response, such as HTTP status, headers, data and others.
 
 ```kotlin
-import org.springframework.web.bind.annotation.PathVariable
-
 // Methods will return JSON, rather than HTML templates
+// Same as @Controller, except it expects response body instead of view to be returned
 @RestController
 // All methods in controller are prefixed with /devices
 @RequestMapping("/devices")
@@ -323,11 +472,50 @@ class DeviceController(
 }
 ```
 
+### JSON manipulation
+By default, all data returned by application is automatically transferred to JSON. We can use certain annotations to tell Spring how to serialize object into a JSON:
+`@JsonProperty` - use this to set name of a property inside a JSON
+`@JsonIgnore` - do not include a property in JSON
+`@JsonFormat` - specify custom format for a property
 
-#### Validation
+```kotlin
+class UserDTO (
+   // Property 'id' will be in JSON as user_id
+    @JsonProperty("user_id")
+    val id: Long,
+   
+    // Property 'password' will not be part of JSON
+    @JsonIgnore
+    val password: String,
+
+    // Specify how to serialize LocalDate to JSON
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yy-MM-dd")
+    val birthDate: LocalDate,
+)
+```
+
+#### Custom serializer
+We can specify a class, that is responsible for serializing an object into JSON:
+
+```kotlin
+@JsonSerialize(using = CustomUserSerializer::class)
+private val user: User? = null
+
+class CustomUserSerializer: JsonSerializer<User> {
+   override fun serialize(user: User, gen: JsonGenerator, serializers: SerializerProvider) {
+      gen.writeStartObject()
+      gen.writeStringField("username", user.getName())
+      gen.writeEndObject()
+   }
+}
+```
+
+For full control, we can also return `Map<String, Object>` from a controller. Map will be converted to JSON.
+
+### Validation
 Validators validate incoming HTTP requests. If request doesn't have required structure, Bad request status is returned automatically. We can use annotation from packages `jakarta.validation.constraints` and `org.hibernate.validator.constraints`.
 
-##### Validate Request Body
+#### Validate Request Body
 
 ```kotlin
 // Define DTO class
@@ -347,7 +535,7 @@ class DeviceController {
 }
 ```
 
-##### Validate Query Parameter
+#### Validate Query Parameter
 To validate a query parameter, add a constraint to controller's method parameter.
 
 ```kotlin
@@ -357,7 +545,7 @@ fun helloWorld(@RequestParam @NotBlank @Size(min = 3) name: String): TestDto {
 }
 ```
 
-##### Validate Path Variable
+#### Validate Path Variable
 To validate a path variable, add a constraint to controller's method parameter.
 
 ```kotlin
@@ -367,10 +555,183 @@ fun test(@PathVariable @NotBlank @Size(min = 3) name: String): TestDto {
 }
 ```
 
-### Services
+#### Custom validation
+First, we need to create an annotation that will represent our custom validator:
+
+```kotlin
+// Specify custom logic for this annotation
+@Constraint(validatedBy = [StartsWithCapitalValidator::class])
+// Specify targets on which this annotation can be used
+@Target(AnnotationTarget.VALUE_PARAMETER,AnnotationTarget.FIELD)
+// Annotation will be executed at runtime, not at compile time
+@Retention(AnnotationRetention.RUNTIME)
+// Specify annotation class and its name 'StartsWithCapital'
+annotation class StartsWithCapital(
+   val message: String = "The string must start with a capital letter",
+   val groups: Array<KClass<*>> = [],
+   val payload: Array<KClass<out Payload>> = []
+)
+```
+
+Now, we should create a validation logic class. It must be the class passed in `@Constraint` in our annotation:
+
+```kotlin
+// Specify on which type the validation goes
+open class StartsWithCapitalValidator : ConstraintValidator<StartsWithCapital?, String?> {
+    override fun isValid(value: String?, context: ConstraintValidatorContext): Boolean {
+        return !value.isNullOrEmpty() && Character.isUpperCase(value[0])
+    }
+}
+```
+
+Now we can apply the validation on a `String` parameter:
+
+```kotlin
+@GetMapping("/{name}")
+fun test(@PathVariable @StartsWithCapital name: String): String {
+    return "Hello $name"
+}
+```
+
+## Exception handlers
+Exception handlers are responsible for handling API errors. We can create a handler for each exception and return custom response.
+
+```kotlin
+// Define that this class handles exceptions
+@RestControllerAdvice
+class GlobalExceptionHandler {
+
+    // Handle specific exception and return custom message
+    @ExceptionHandler(NotFoundException::class)
+    fun handleNotFound(ex: NotFoundException): ResponseEntity<String> =
+        ResponseEntity.status(404).body(ex.message)
+}
+```
+
+### CORS
+CORS (Cross Origin Resource Sharing) can be enabled on method level, class level or server level:
+
+```kotlin
+// Enable CORS for particular method
+@CrossOrigin(origins = "http://localhost:9000")
+fun handleRequest() {
+   // Generate response
+}
+
+// Enable CORS for all method inside a controller class
+@CrossOrigin(origins = "https://example.com", methods = { RequestMethod.GET, RequestMethod.POST })
+class UserController
+
+// Enable CORS on server level
+@Configuration
+class WebConfig {
+   @Bean
+   fun corsConfigurer(): WebMvcConfigurer {
+      return object : WebMvcConfigurer {
+         override fun addCorsMappings(registry: CorsRegistry) {
+            registry.addMapping("/**") // Enable all endpoints
+               .allowedOrigins("http://example.com") // Allow specific site
+               .allowedMethods("GET", "POST") // Allow specific methods
+               .allowedHeaders("*") // Allow al headers
+               .allowCredentials(true) // Allow sending credentials
+         }
+      }
+   }
+}
+```
+
+## Consuming REST services
+Spring application can use multiple libraries to make HTTP requests to different APIs. Old application can use deprecated RestTemplate class, which is part of `Spring Web` library. More modern approach is to use `WebClient` to make HTTP requests, or `OpenFeign` to declare an interface for each REST API and let the library do the work.
+
+### Using WebClient
+`WebClient` can be used for reactive programming, because it returns `Mono` object, which can be observed.
+
+A dependency needs to be added:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
+</dependency>
+```
+
+Example usage:
+
+```kotlin
+@Service
+class UserService(builder: WebClient.Builder) {
+
+   private val webClient: WebClient = builder.baseUrl("https://www.example.com/api").build()
+
+   fun fetchUser(): Mono<User> {
+      return webClient
+         .get()
+         .uri("/user")
+         .retrieve()
+         .bodyToMono(User::class.java)
+   }
+}
+
+@RestController
+class UserController(
+    private val userService: UserService
+) { 
+    @GetMapping
+    fun printUserEmails() {
+        return userService.fetchUser().map(User::getEmail).subscribe(System.out::println)
+    }
+}
+```
+
+### Using OpenFeign
+in OpenFeign, we define an interface and the library will generated the implementation.
+
+First we add a dependency:
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-openfeign</artifactId>
+</dependency>
+```
+
+Example:
+
+```kotlin
+@SpringBootApplication
+@EnableFeignClients // Enable OpenFeign
+class MyApplication
+
+// Create Feign interface
+@FeignClient(name = "users", url = "https://www.example.com/api", configuration = FeignConfig::class.java)
+interface UsersApiClient {
+
+   @GetMapping("/users")
+   fun getUsers(@RequestHeader("Authorization") token: String): List<User>
+}
+
+// Call REST API
+@Service
+class MyService(private val usersApiClient: UsersApiClient) {
+   fun printUsers(apiToken: String) {
+      val users: List<User> = usersApiClient.getUsers(apiToken)
+      println(users.joinToString(","))
+   }
+}
+
+// Or configure api token for each request
+@Configuration
+class FeignConfig {
+   @Bean
+   fun requestInterceptor(): RequestInterceptor {
+      return RequestInterceptor { it.header("Authorization", "Bearer your-token") }
+   }
+}
+```
+
+## Services
 Services contain business logic.
 
-#### Example Service
 ```kotlin
 @Service
 class DeviceService(
@@ -384,22 +745,41 @@ class DeviceService(
 }
 ```
 
-### Repositories
+### JSON
+Spring Boot provides integration with three JSON mapping libraries: `GSON`, `Jackson` (default) and `JSON-B`. Auto-configuration for Jackson is provided and Jackson is part of `spring-boot-starter-json`. When Jackson is on the classpath an `ObjectMapper` bean is automatically configured.
+
+We can also write our own `JsonSerializer` and `JsonDeserializer` classes. Custom serializers are usually registered with Jackson through a module, but Spring Boot provides an alternative `@JsonComponent` annotation that makes it easier to directly register Spring Beans.
+
+```kotlin
+@JsonComponent
+class MyJsonComponent {
+   class Serializer : JsonSerializer<MyObject>() {
+      @Throws(IOException::class)
+      override fun serialize(value: MyObject, jgen: JsonGenerator, serializers: SerializerProvider) {
+         jgen.writeStartObject()
+         jgen.writeStringField("name", value.name)
+         jgen.writeNumberField("age", value.age)
+         jgen.writeEndObject()
+      }
+   }
+
+   class Deserializer : JsonDeserializer<MyObject>() {
+      @Throws(IOException::class, JsonProcessingException::class)
+      override fun deserialize(jsonParser: JsonParser, ctxt: DeserializationContext): MyObject {
+         val codec = jsonParser.codec
+         val tree = codec.readTree<JsonNode>(jsonParser)
+         val name = tree["name"].textValue()
+         val age = tree["age"].intValue()
+         return MyObject(name, age)
+      }
+   }
+
+}
+```
+
+## Repositories
 `JpaRepository` is used to manage database access.
 
-#### Entity Graphs
-Entity graphs optimize database queries by fetching specific attributes using single SQL query.
-
-#### Pagination
-TODO
-
-#### Sorting
-TODO
-
-#### Transactional
-TODO
-
-#### Example Repository
 ```kotlin
 @Repository
 interface DeviceRepository: JpaRepository<Device, Long> {
@@ -412,10 +792,24 @@ interface DeviceRepository: JpaRepository<Device, Long> {
 }
 ```
 
-### DTOs
+### Entity Graphs
+Entity graphs optimize database queries by fetching specific attributes using single SQL query.
+
+### Pagination
+TODO
+
+### Sorting
+TODO
+
+### Transactional
+TODO
+
+### Migrations
+TODO
+
+## DTOs
 DTOs carry data between layers without exposing entity internals. They can also include validation annotations if used in controllers. Each annotation must start with `field:`.
 
-#### Example DTO
 ```kotlin
 data class CreateDeviceDto(
     @field:NotBlank(message = "Device name cannot be blank")
@@ -426,7 +820,7 @@ data class CreateDeviceDto(
 ### Entities
 Entities represent database tables. They must have `@Id` and may contain database relationships and columns. Relationship's default fetch type is `FetchType.EAGER`, which means that when loading single record from database (using `findById`), relationship is automatically loaded as well.
 
-#### Auditing
+### Auditing
 Audit columns are used to track creation and modification of database records.
 
 1. Enable auditing
@@ -458,7 +852,6 @@ Audit columns are used to track creation and modification of database records.
     }
     ```
 
-#### Example entity
 ```kotlin
 @Entity
 data class Device(
@@ -475,10 +868,9 @@ data class Device(
 )
 ```
 
-### Mappers
+## Mappers
 Mappers map entities to DTOs and vice-versa.
 
-#### Example Mapper
 ```kotlin
 fun Device.toDto() = DeviceDto(
     id = this.id!!,
@@ -487,26 +879,10 @@ fun Device.toDto() = DeviceDto(
 )
 ```
 
-### Exception handlers
-Exception handlers are responsible for handling API errors. We can create a handler for each exception and return custom response.
-
-#### Example Exception Handler
-```kotlin
-// Define that this class handles exceptions
-@RestControllerAdvice
-class GlobalExceptionHandler {
-
-    // Handle specific exception and return custom message
-    @ExceptionHandler(NotFoundException::class)
-    fun handleNotFound(ex: NotFoundException): ResponseEntity<String> =
-        ResponseEntity.status(404).body(ex.message)
-}
-```
-
-### Security
+## Security
 Spring Boot Security allows us to use authentication and authorization, protect against CSRF and XSS and implement JWT, OAuth2 or LDAP.
 
-#### Default behavior
+### Default behavior
 - All HTTP endpoints are secured, requiring authentication.
 - A default form-based login page is provided for user authentication.
 - A default user is created with the username user and a random password printed to the console at startup.
@@ -516,7 +892,7 @@ Spring Boot Security allows us to use authentication and authorization, protect 
 
 To customize this behavior, we need to provide a security configuration. We can use annotation `EnableWeSecurity` to configure own security rules instead of using the default security auto-configuration.
 
-##### Security Filter Chain
+### Security Filter Chain
 Spring Security uses a chain of servlet filters to handle security for incoming HTTP requests. Each filter performs a specific task, such as authentication, authorization, or CSRF protection. The filter chain is invoked before the request reaches the application's controllers.
 
 To enable security for our application, we need to add Spring Boot Security Starter dependency. By default, all endpoints are secured even if no configuration is added. Default username is `user` and generated password is printed to console.
@@ -559,7 +935,7 @@ class SecurityConfig {
 }
 ```
 
-#### Credentials validation
+### Credentials validation
 In Spring Security, an AuthenticationProvider is responsible for validating credentials, returning a valid Authentication object if successful and throwing exceptions if authentication fails.
 
 Spring Security already provides built-in providers, but sometimes we need own custom logic. When someone tries to authenticate, Spring Security calls our CustomAuthenticationProvider.
@@ -600,7 +976,7 @@ fun authenticationManager(): AuthenticationManager {
 }
 ```
 
-#### Authentication
+### Authentication
 If user provides credentials using any of configured authentication providers (basic auth or form login), the filter extracts them and delegates to the AuthenticationManager.
 
 `Authentication manager` verifies credentials and returns an Authentication object if successful.
@@ -618,10 +994,10 @@ authenticationManager.authenticate(
 )
 ```
 
-#### Authorization
+### Authorization
 We can configure URL-based access and method-level security in SecurityConfig.
 
-##### URL-based access
+#### URL-based access
 We can protect endpoints based on roles specified in `SecurityFilterChain`:
 
 ```kotlin
@@ -641,7 +1017,7 @@ class SecurityConfig{
 }
 ```
 
-##### Method-level security
+#### Method-level security
 Method-level security allows us to secure any individual method. When a method is invoked, Spring Security intercepts the call before the method is executed. It checks the current user’s roles, permissions, or other security attributes. If the expression in `@PreAuthorize` or `@Secured` is true, the method is executed. If not, a 403 Forbidden error is thrown.
 
 First, we need to enable method-level security:
@@ -657,7 +1033,7 @@ We can use following annotations:
 - `@PreAuthorize` – Allows us to specify more complex conditions for method access.
 - `@Secured` – A simpler annotation, typically used to check roles.
 
-###### Preauthorize
+##### Preauthorize
 `@PreAuthorize` provides a very powerful and flexible way to control access to methods using Spring Expression Language (SpEL). We can define complex expressions that check things like roles, permissions, or even user-specific data.
 
 ```kotlin
@@ -694,7 +1070,7 @@ class InvoiceController(
 }
 ```
 
-###### Secured
+##### Secured
 `@Secured` is simpler than `@PreAuthorize` and is used to restrict access based on roles only. It can be used on methods or classes.
 
 ```kotlin
@@ -705,7 +1081,7 @@ fun updateProduct(productId: Long) {
 ```
 
 
-#### User Details Service
+### User Details Service
 It defines how to load user information from your database (or other sources) when Spring Security needs it.
 
 UserDetailsService uses `UserDetails`, which represents the authenticated user in Spring Security.
@@ -732,7 +1108,7 @@ class CustomUserDetailsService(
 }
 ```
 
-#### Security Context
+### Security Context
 Stores the authenticated user's details (e.g., Authentication object) during a request. The SecurityContextHolder makes this information accessible throughout the application
 
 ```kotlin
@@ -751,7 +1127,7 @@ fun extractUsername(): String {
 }
 ```
 
-#### Session management
+### Session management
 Spring Security, by default, creates a session (HttpSession) when a user logs in (via form login, basic auth, etc.). The session stores the SecurityContext — meaning the authenticated user information. Future requests reuse the session, so users don’t need to re-authenticate every time.
 
 We can disable session in security configuration:
@@ -766,7 +1142,7 @@ fun defaultSecurityFilterChain(http: HttpSecurity): SecurityFilterChain {
 }
 ```
 
-#### CSRF
+### CSRF
 Cross-Site Request Forgery is a kind of attack where a malicious website tricks a user’s browser into sending unwanted requests to your app. When CSRF protection is enabled, every request except GET must include a special CSRF token. Spring Security checks the token against the session’s CSRF token. If the token is missing or invalid, request is rejected (403 Forbidden).
 
 It can be disabled in security configuration:
@@ -781,7 +1157,7 @@ It can be disabled in security configuration:
     }
 ```
 
-#### Default configuration
+### Default configuration
 Default configuration of Spring Security is available in class `SecurityFilterChainConfiguration`. It defines a bean that provides an instance of `SecurityFilterChain` class. It is configured to require each request to be authenticated. User can authenticate using either login form or basic authentication.
 
 ```java
@@ -799,7 +1175,7 @@ SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Excepti
 }
 ```
 
-#### Custom configuration
+### Custom configuration
 Allow all requests:
 
 ```kotlin
@@ -835,7 +1211,7 @@ fun defaultSecurityFilterChain(http: HttpSecurity): SecurityFilterChain {
 }
 ```
 
-#### Get access to authenticated user
+### Get access to authenticated user
 There are multiple ways to access currently signed in user. We can use `SecurityContext`, `Authentication` object or inject user instance directly using `@AuthenticationPrincipal` annotation.
 
 When using `@AuthenticationPrincipal` annotation, Spring automatically pulls the principal from `SecurityContextHolder.getContext().authentication.principal` and automatically casts it to our custom user object that implements UserDetails interface.
@@ -860,7 +1236,7 @@ fun user(@AuthenticationPrincipal user: User): TestDto {
 }
 ```
 
-#### Customize unauthenticated response
+### Customize unauthenticated response
 If form login is enabled, Spring Security redirects the user to a login page when unauthenticated. If form login is disabled, empty response with status code 401 is returned.
 
 We can customize the behavior by using `AuthenticationEntryPoint` interface. It is invoked when a request is made to a secured resource, but the user is not authenticated.
@@ -906,28 +1282,24 @@ fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
 }
 ```
 
-#### CORS
-CORS (Cross-Origin Resource Sharing) is a security feature implemented by browsers that prevents a webpage from making requests to a different domain (or origin) than the one that served the webpage. If frontend app is hosted on a different domain than backend app, the browser will block the requests due to the same-origin policy. In this case, we need to configure CORS on backend to allow specific origins to access the resources.
+### Logging
+We can turn on debug logs for spring boot security:
 
-```kotlin
-@Bean
-fun corsConfigurer(): WebMvcConfigurer { 
-    return object : WebMvcConfigurer { 
-        override fun addCorsMappings(registry: CorsRegistry) {
-            // Allow these origins
-            registry.allowedOrigins("http://localhost:3000", "https://yourfrontenddomain.com")
-         }
-  }
-}
+```yaml
+logging:
+  level:
+    org:
+      springframework:
+        security: debug
 ```
 
-### Caching
+## Caching
 TODO
 
-### Event handling
+## Event handling
 TODO
 
-### Testing
+## Testing
 To get Spring Boot specific features within tests (access to application context, config file or dependency injection), the test class must be annotated with `@SpringBootTest` annotation. By default, Spring loads default `application.yml` configuration file from `src/resources` directory, but if we created `test/resources/application.yml` file, Spring loads it by default when running tests. In test config, we usually define H2 in memory database:
 
 ```yaml
@@ -944,7 +1316,7 @@ spring:
     show-sql: true  # Enable SQL query logging
 ```
 
-#### Mocking
+### Mocking
 We use Mocking if we don't want to use real dependency of a class. Spring Boot provides `@MockitoBean` annotation, which creates a mock bean and injects it whenever any class asks for the dependency.
 
 ```kotlin
@@ -966,10 +1338,10 @@ class SimpleTest {
 }
 ```
 
-#### Test Driven Development
+### Test Driven Development
 Using TDD, we first write test that fails and then write the code to make the test success. Afterward, we can refactor the code and run the test again.
 
-#### Test Helpers
+### Test Helpers
 Following annotations and functions can run code before first or each test or setup test database.
 
 ```kotlin
@@ -1018,7 +1390,7 @@ class TestApplication {
 }
 ```
 
-#### Unit tests
+### Unit tests
 Using unit tests, we make sure that smallest pieces of code (functions, classes) works correctly.
 
 ```kotlin
@@ -1044,7 +1416,7 @@ class UnitTests {
 }
 ```
 
-#### Integration tests
+### Integration tests
 Integration tests verify that multiple components work correctly together. Usually, we set up testing database with testing data. We can either insert testing data in `@BeforeEach` method and delete them in `@AfterEach` method, or we can use `@Sql(data.sql)` annotation on test method to automatically execute specified SQL queries.
 
 ```kotlin
@@ -1065,7 +1437,7 @@ class IntegrationTests {
 }
 ```
 
-#### End-to-End Tests
+### End-to-End Tests
 In Spring Boot, we don't have to run whole application with web server to test controllers. Instead, there is annotation `@AutoConfigureMockMvc` that prepares application for testing a controller's methods. It works along `MockMvc` class that simulates HTTP requests without actually performing it.
 
 ```kotlin
@@ -1179,6 +1551,68 @@ Spring Boot includes a number of additional features to help you monitor and man
 ### Endpoints
 [Here](https://docs.spring.io/spring-boot/api/rest/actuator/index.html) you can find example usage for all actuator endpoints. You can use applications like [Spring Boot Admin](https://github.com/codecentric/spring-boot-admin?tab=readme-ov-file), which add a GUI over layer of actuator endpoints.
 
+If using Spring Security, we can permit access to all actuator endpoint:
+
+```kotlin
+@Bean
+fun defaultSecurityFilterChain(http: HttpSecurity): SecurityFilterChain {
+    return http.authorizeHttpRequests { 
+             it.requestMatchers("/actuator/**").permitAll()
+            .anyRequest().authenticated() 
+        }
+        .build()
+}
+```
+
+Here is the list of most endpoints:
+- conditions - report of autoconfiguration conditions
+- configprops - list of all configuration properties
+- beans - list of all beans available inside Spring Context
+- env - produces report of all property sources and profiles
+- heapdump - download heap dump of an application
+- health - reports whether application is up and running
+- info - expose some extra information defined by developer
+- loggers - list of packages and their loggers and log levels
+- mappings - list of all HTTP request mappings
+- scheduledtasks - list of all scheduled tasks
+- threaddump - report of all application threads
+- metrics - list of all available metrics
+
+#### Info endpoint
+We can specify info properties either using application properties file or by implementing InfoContributor interface:
+
+#### Specify info in application properties
+First we need to enable `info` property:
+
+```yaml
+management:
+  info:
+    env:
+      enabled: true
+```
+
+Now we can for example expose application version defined in `pom.xml` file:
+
+```yaml
+info:
+  app:
+    name: MyApp
+    version: '@project.version@'
+    description: Production API
+```
+
+#### Specify info using Kotlin
+Implement `InfoContributor` interface and specify `contribute` function, in which we can access to info builder and add info properties.
+
+```kotlin
+@Component
+class InfoProps: InfoContributor {
+    override fun contribute(builder: Info.Builder?) {
+        builder?.withDetail("name", this::class.simpleName)
+    }
+}
+```
+
 ### Endpoint access control
 You can control access to each individual endpoint and expose them over HTTP or JMX. An endpoint is considered to be available when access to it is permitted and it is exposed. By default, access to all endpoints except for shutdown is unrestricted. If security dependency is added, all endpoints except `health` are secured.
 
@@ -1198,7 +1632,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: "beans,shutdown"
+        include: "beans,shutdown" # Or use '*' for exposing all endpoints
 ```
 
 ### Loggers
@@ -1211,22 +1645,229 @@ To configure a given logger, POST a partial entity to the resource’s URI, as t
 }
 ```
 
-### Open API Docs
+### Spring Boot Admin
+Spring Boot Admin is a third-party application that serves as a GUI for Spring Boot Actuator endpoints. We can create a Spring Boot Admin Server application, that will act as an storage for all Spring Boot Admin Clients. Clients will send all actuator information to configured URL of Spring Boot Admin Server. Spring Boot Admin can also be configured to use Spring Cloud Discovery.
+
+#### Create server application
+We need to create brand new Spring Boot application, specify dependencies and add configuration annotation to enable Spring Boot Admin.
+
+```xml
+<!-- Add Spring Boot Web and Spring Boot Admin Server dependencies -->
+<dependency>
+   <groupId>de.codecentric</groupId>
+   <artifactId>spring-boot-admin-starter-server</artifactId>
+   <version>3.4.5</version>
+</dependency>
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+```
+
+```kotlin
+// Enable Spring Boot Admin Server
+@EnableAdminServer
+@SpringBootApplication
+class DevicesApplication
+```
+
+#### Register client applications
+
+```xml
+<!-- Add Spring Boot Security and Spring Boot Admin Client dependencies -->
+<dependency>
+   <groupId>de.codecentric</groupId>
+   <artifactId>spring-boot-admin-starter-client</artifactId>
+   <version>3.4.5</version>
+</dependency>
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  application:
+    name: App name # Specify app name visible by Spring Boot Admin
+  boot:
+    admin:
+      client:
+        url: http://localhost:8080 # Specify URL of Spring Boot Admin
+```
+
+## Logging
+Spring Boot supports SLF4J, Logback (default), Java Util and Log4J2. Default logging output for all logs is console. By default, Spring enables logging for levels `ERROR`, `WARN` and `INFO`.
+
+```kotlin
+val logger = LoggerFactory.getLogger(this.javaClass)
+logger.info("Hello World")
+```
+
+### Debug and trace modes
+`DEBUG` or `TRACE` modes can be enabled in properties file. When the debug or trace mode is enabled, a selection of core loggers (embedded container, Hibernate, and Spring Boot) are configured to output more information. Enabling the debug or trace modes does not configure an application to log all messages with `DEBUG` level.
+
+```shell
+# Run application in debug mode
+java -jar application.jar --debug
+
+# Run application in trace mode
+java -jar application.jar --trace
+```
+
+```yaml
+# Enable debug logging
+debug: true
+# Enable debug and trace logging
+trace: true
+```
+
+### Change log level of application packages
+We set `logging.level.root` property to change logging level of all packages within our application (including libraries and application classes).
+
+```yaml
+# Enable DEBUG level for whole application
+logging:
+  level:
+    root: debug
+```
+
+To change logging level of particular package, we must specify full package name:
+
+```yaml
+# Enable DEBUG level for Spring Security and others
+logging:
+   level:
+      org.springframework.web: debug
+      org.hibernate: error
+      org.springframework.security: debug
+```
+
+### Change log level of group of packages
+We can also group certain packages for logging purposes and then set logging level for whole group:
+
+```yaml
+# Create logging group
+logging:
+  group:
+    users: com.example.controllers.users,com.example.services.users
+# Assign logging level for whole group
+  level:
+    users: debug
+```
+
+### File output
+By default, Spring Boot logs only to the console and does not write log files. To write logs into files in addition to the console output, we need to set a `logging.file.name` or `logging.file.path` property. If both properties are set, `logging.file.path` is ignored and only `logging.file.name` is used.
+
+```yaml
+logging:
+   file:
+      # 'spring.log' will be created at root directory of project
+      path: '.'
+      # 'app.log' will be created at root directory of project
+      name: 'app.log'
+    
+```
+
+#### File rotation
+When using Logback, log files rotate automatically when they reach 10 MB. However, it is possible to fine-tune log rotation settings using your `properties` file.
+
+#### Structured Logging
+Structured logging is a technique where the log output is written in a well-defined, often machine-readable format. Spring Boot supports structured logging and has support for the following JSON formats out of the box:
+- Elastic Common Schema
+- Graylog Extended Log Format
+- Logstash
+
+To enable structured logging, set the property `logging.structured.format.console` (for console output) or `logging.structured.format.file` (for file output) to the id of the format you want to use. We can also add custom static values to the JSON log using `logging.structure.json.add` property.
+
+```yaml
+logging:
+  structured:
+    format:
+      console: logstash # Console output will be formatted using logstash structured logging
+      file: logstash  # File output will be formatted using logstash structured logging
+    json:
+      add:
+        version: 2 # Each logging statement will contain version value
+```
+
+## Spring Data REST
+Spring Data REST is a Spring project that automatically exposes your JPA repositories as RESTful HTTP endpoints — without the need to manually write controller and service classes. It follows the HATEOAS (Hypermedia As The Engine Of Application State) principle, and can also serve data in the HAL (Hypertext Application Language) format. For each JPA repository method, a REST endpoint is created. This is also true for custom JPA methods and queries.
+
+Additionally, Spring Data REST also provides `/profile` endpoint that returns list of all available endpoint and their metadata.
+
+Add following dependency:
+
+```xml
+<dependency>
+   <groupId>org.springframework.boot</groupId>
+   <artifactId>spring-boot-starter-data-rest</artifactId>
+</dependency>
+```
+
+Define JPA Repository:
+
+```kotlin
+@RepositoryRestResource
+interface UserRepository: JpaRepository<User, Long>
+````
+
+### Configuration
+We can configure base path for all REST endpoints:
+
+```yaml
+spring:
+  data:
+    rest:
+      basePath: /api
+```
+
+Change REST path of repository:
+
+```kotlin
+@ReposutoryRestResource(path="user")
+interface UserRepository: JpaRepository<User,Long>
+```
+
+Do not expose REST API for particular JPA repository:
+
+```kotlin
+@ReposutoryRestResource(exported = false)
+interface UserRepository: JpaRepository<User,Long>
+```
+
+### HAL Explorer
+HAL (Hypertext Application Language) is a standard for representing resources with hypermedia links. Spring Data REST uses HAL to add _links fields to JSON responses. It makes an API navigable — a REST client can follow the links. This way, an application will be easily navigable and explorable by HAL GUI application.
+
+HAL Explorer is a browser-based GUI for navigating Spring Data REST APIs. It discovers exposed endpoints, explores linked resources and sends requests from the UI.
+
+Add following dependency:
+
+```xml
+<dependency>
+   <groupId>org.springframework.data</groupId>
+   <artifactId>spring-data-rest-hal-explorer</artifactId>
+</dependency>
+```
+
+## Open API Docs
 TODO
 
 
-### Microservices
+## Microservices
 
-#### Spring Cloud Gateway
+### Spring Cloud Gateway
 
-#### Service discovery
+### Service discovery
 
-#### Config Server
+### Config Server
 
-#### Resilience4J
+### Resilience4J
 
-#### Distributed Transactions
+### Distributed Transactions
 
 
-![img.png](img.png)
 
+TODO: sections 15, 16, 17, 18, 20, 23, 24, 25, 26
+
+https://haee.udemy.com/course/spring-springboot-jpa-hibernate-zero-to-master/
